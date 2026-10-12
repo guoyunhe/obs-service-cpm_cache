@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""OBS Source Service to download and cache CPM.cmake dependencies."""
+
+import argparse
+import glob
+import logging
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tarfile
+import tempfile
+
+
+LOG = logging.getLogger("obs-service-cpm_cache")
+ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar")
+COMPRESSION_MODES = {"gz": "w:gz", "bz2": "w:bz2", "xz": "w:xz", "tar": "w"}
+
+
+class ServiceError(Exception):
+    pass
+
+
+def archive_autodetect():
+    specs = sorted(Path.cwd().glob("*.spec"), reverse=True)
+    if not specs:
+        raise ServiceError(f"No spec file found in {Path.cwd()}")
+
+    stem = specs[0].stem
+    patterns = [
+        f"{stem}*{suffix}" for suffix in ARCHIVE_SUFFIXES
+    ] + [
+        f"_service:*:{stem}*{suffix}" for suffix in ARCHIVE_SUFFIXES
+    ] + [stem]
+    for pattern in patterns:
+        matches = sorted(Path.cwd().glob(pattern), reverse=True)
+        if matches:
+            LOG.info("Archive autodetected at %s", matches[0])
+            return matches[0]
+    raise ServiceError("Archive autodetection found no matching source")
+
+
+def resolve_source(source_root, basename=None, subdir=None):
+    root = Path(source_root).resolve()
+    if basename:
+        source = (root / basename).resolve()
+        if not source.is_relative_to(root):
+            raise ServiceError(f"Invalid basename outside source directory: {basename}")
+    else:
+        candidates = sorted(
+            path.parent
+            for path in root.rglob("CMakeLists.txt")
+            if ".git" not in path.parts
+        )
+        if not candidates:
+            raise ServiceError(f"No CMakeLists.txt found under {root}")
+        shallowest = min(len(path.relative_to(root).parts) for path in candidates)
+        candidates = [
+            path for path in candidates if len(path.relative_to(root).parts) == shallowest
+        ]
+        if len(candidates) != 1:
+            raise ServiceError(
+                "Multiple CMake projects found; specify the project with --basename"
+            )
+        source = candidates[0]
+
+    if subdir:
+        relative_subdir = Path(subdir)
+        if relative_subdir.is_absolute() or ".." in relative_subdir.parts:
+            raise ServiceError(f"Invalid subdir: {subdir}")
+        source = source / relative_subdir
+
+    source = source.resolve()
+    if not source.is_relative_to(root) or not (source / "CMakeLists.txt").is_file():
+        raise ServiceError(f"CMakeLists.txt not found in source directory {source}")
+    return source
+
+
+def extract_archive(archive_path, destination):
+    try:
+        with tarfile.open(archive_path, "r:*") as archive:
+            archive.extractall(destination, filter="data")
+    except (tarfile.TarError, OSError) as error:
+        raise ServiceError(f"Unable to extract {archive_path}: {error}") from error
+
+
+def run_service(args):
+    cache_name = Path(args.cachename)
+    if cache_name.name != args.cachename or args.cachename in ("", ".", ".."):
+        raise ServiceError(f"Invalid cache name: {args.cachename}")
+
+    archive_path = None
+    if args.archive:
+        matches = sorted(glob.glob(args.archive), reverse=True)
+        if not matches:
+            raise ServiceError(f"No archive matches {args.archive}")
+        archive_path = Path(matches[0])
+    else:
+        archive_path = archive_autodetect()
+
+    if not archive_path.exists():
+        raise ServiceError(f"Source archive does not exist: {archive_path}")
+
+    with tempfile.TemporaryDirectory(prefix="cpm-cache-") as temporary_directory:
+        temporary_root = Path(temporary_directory)
+        source_root = temporary_root / "source"
+        source_root.mkdir()
+        if archive_path.is_dir():
+            shutil.copytree(archive_path, source_root, dirs_exist_ok=True, symlinks=True)
+        else:
+            extract_archive(archive_path, source_root)
+
+        source = resolve_source(source_root, args.basename, args.subdir)
+        cache_directory = temporary_root / "cache"
+        cache_directory.mkdir()
+        build_directory = temporary_root / "build"
+        environment = os.environ.copy()
+        environment["CPM_SOURCE_CACHE"] = str(cache_directory)
+
+        command = [
+            args.cmake,
+            "-S",
+            str(source),
+            "-B",
+            str(build_directory),
+            f"-DCPM_SOURCE_CACHE={cache_directory}",
+        ]
+        LOG.info("Configuring %s to download CPM dependencies", source)
+        try:
+            subprocess.run(command, check=True, env=environment)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise ServiceError(f"CMake configuration failed: {error}") from error
+
+        if not any(cache_directory.iterdir()):
+            raise ServiceError("CMake did not populate the CPM source cache")
+
+        output_directory = Path(args.outdir).resolve()
+        output_directory.mkdir(parents=True, exist_ok=True)
+        extension = "" if args.compression == "tar" else f".{args.compression}"
+        output_path = output_directory / f"{args.cachename}.tar{extension}"
+        with tarfile.open(output_path, COMPRESSION_MODES[args.compression]) as output:
+            output.add(cache_directory, arcname=args.cachename)
+        LOG.info("Created CPM source cache archive %s", output_path)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--archive", help="Source archive or directory (default: autodetect)")
+    parser.add_argument("--outdir", default=".", help="Output directory")
+    parser.add_argument(
+        "--compression", choices=COMPRESSION_MODES, default="gz", help="Output compression"
+    )
+    parser.add_argument("--basename", help="Project directory within the extracted archive")
+    parser.add_argument("--subdir", help="Project subdirectory containing CMakeLists.txt")
+    parser.add_argument("--cachename", default="cpm_cache", help="Generated cache directory name")
+    parser.add_argument("--cmake", default="cmake", help="CMake executable")
+    args = parser.parse_args(argv)
+
+    try:
+        run_service(args)
+    except ServiceError as error:
+        LOG.error("%s", error)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    raise SystemExit(main())

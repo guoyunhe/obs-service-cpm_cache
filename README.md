@@ -25,8 +25,12 @@ Run it with `osc service manualrun`. The generated archive contains the
 use the cached dependencies without an extra cache parameter:
 
 ```sh
-tar -xf cpm_cache.tar.gz
-cmake -S . -B build
+Source0: %{name}-%{version}.tar.gz
+Source1: cpm_cache.tar.gz
+
+%prep
+%autosetup -p1
+tar -xf %{SOURCE1}
 ```
 
 The `compression` parameter supports `gz` (default), `bz2`, `xz`, and `tar`.

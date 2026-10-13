@@ -43,11 +43,13 @@ top-level CMake directory.
 
 ## Update *.spec
 
+1. Add `Source1: cpm_cache.tar.gz` (file extension can be different if you choose other compression algorithm)
+2. Add `-a1` argument to `%setup` or `%autosetup` macro, extracting `Source1: cpm_cache.tar.gz` to build directory
+
 ```sh
 Source0: %{name}-%{version}.tar.gz
 Source1: cpm_cache.tar.gz
 
 %prep
-%autosetup -p1
-tar -xf %{SOURCE1}
+%autosetup -p1 -a1
 ```

@@ -111,8 +111,8 @@ def run_service(args):
             extract_archive(archive_path, source_root)
 
         source = resolve_source(source_root, args.basename, args.subdir)
-        cache_directory = temporary_root / "cache"
-        cache_directory.mkdir()
+        cache_directory = source / ".cache" / "cpm"
+        cache_directory.mkdir(parents=True)
         build_directory = temporary_root / "build"
         environment = os.environ.copy()
         environment["CPM_SOURCE_CACHE"] = str(cache_directory)
@@ -123,7 +123,6 @@ def run_service(args):
             str(source),
             "-B",
             str(build_directory),
-            f"-DCPM_SOURCE_CACHE={cache_directory}",
         ]
         LOG.info("Configuring %s to download CPM dependencies", source)
         try:
@@ -139,7 +138,7 @@ def run_service(args):
         extension = "" if args.compression == "tar" else f".{args.compression}"
         output_path = output_directory / f"{args.cachename}.tar{extension}"
         with tarfile.open(output_path, COMPRESSION_MODES[args.compression]) as output:
-            output.add(cache_directory, arcname=args.cachename)
+            output.add(cache_directory, arcname=".cache/cpm")
         LOG.info("Created CPM source cache archive %s", output_path)
 
 
@@ -152,7 +151,7 @@ def main(argv=None):
     )
     parser.add_argument("--basename", help="Project directory within the extracted archive")
     parser.add_argument("--subdir", help="Project subdirectory containing CMakeLists.txt")
-    parser.add_argument("--cachename", default="cpm_cache", help="Generated cache directory name")
+    parser.add_argument("--cachename", default="cpm_cache", help="Generated cache archive name")
     parser.add_argument("--cmake", default="cmake", help="CMake executable")
     args = parser.parse_args(argv)
 

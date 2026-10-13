@@ -45,6 +45,13 @@ class CpmCacheTests(unittest.TestCase):
 
             def fake_cmake(command, check, env):
                 cache = Path(env["CPM_SOURCE_CACHE"]) / "dependency" / "revision"
+                self.assertNotIn(
+                    "-DCPM_SOURCE_CACHE=" + env["CPM_SOURCE_CACHE"], command
+                )
+                self.assertEqual(
+                    Path(env["CPM_SOURCE_CACHE"]),
+                    Path(command[2]) / ".cache" / "cpm",
+                )
                 cache.mkdir(parents=True)
                 (cache / "source.txt").write_text("cached")
 
@@ -58,7 +65,7 @@ class CpmCacheTests(unittest.TestCase):
             self.assertTrue(archive_path.is_file())
             with tarfile.open(archive_path, "r:gz") as archive:
                 self.assertEqual(
-                    archive.extractfile("cpm_cache/dependency/revision/source.txt")
+                    archive.extractfile(".cache/cpm/dependency/revision/source.txt")
                     .read()
                     .decode(),
                     "cached",

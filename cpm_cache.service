@@ -1,6 +1,6 @@
 <service name="cpm_cache">
   <summary>OBS Source Service to download and cache CPM.cmake dependencies</summary>
-  <description>This service configures a CMake project with CPM_SOURCE_CACHE set, then creates an archive of the downloaded CPM dependency sources for offline builds.</description>
+  <description>This service configures a CMake project with CPM_SOURCE_CACHE set to .cache/cpm, then creates an archive of the downloaded CPM dependency sources for offline builds.</description>
   <parameter name="archive">
     <description>Source archive or directory containing the CMake project. By default the service autodetects an archive matching the spec file.</description>
   </parameter>
@@ -14,6 +14,6 @@
     <description>Project subdirectory containing CMakeLists.txt, relative to the detected or specified project directory.</description>
   </parameter>
   <parameter name="cachename">
-    <description>Name of the generated CPM source cache directory and archive. Default: cpm_cache.</description>
+    <description>Name of the generated CPM source cache archive. Default: cpm_cache.</description>
   </parameter>
 </service>
